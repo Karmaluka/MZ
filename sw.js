@@ -1,4 +1,4 @@
-const CACHE_NAME = "oshchadna-knyzhka-v2";
+const CACHE_NAME = "oshchadna-knyzhka-v3";
 const ASSETS = [
   "./oshchadna-knyzhka.html",
   "./manifest.json",

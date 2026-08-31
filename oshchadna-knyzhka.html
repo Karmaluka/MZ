@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Ощадна книжка — мої заощадження</title>
+<title>Мої заощадження</title>
 <link rel="manifest" href="manifest.json" />
 <meta name="theme-color" content="#1F4B3F" />
 <link rel="icon" href="icon-192.png" />
@@ -11,7 +11,7 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Ощадна книжка" />
+<meta name="apple-mobile-web-app-title" content="Мої заощадження" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -309,6 +309,19 @@ function App() {
     await writable.close();
   }
 
+  async function forceSaveNow() {
+    if (!fileHandle) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setAutoSaveState("saving");
+    try {
+      await writeToHandle(fileHandle);
+      setAutoSaveState("saved");
+      setLastSavedAt(new Date());
+    } catch (e) {
+      setAutoSaveState("error");
+    }
+  }
+
   async function connectExcelFile() {
     try {
       const handle = await window.showSaveFilePicker({
@@ -372,6 +385,54 @@ function App() {
     }, 600);
     return () => clearTimeout(autoSaveTimer.current);
   }, [entries, fileHandle]);
+
+  // додаткова підстраховка: коли застосунок згортається/ховається (Android може будь-коли
+  // "вбити" фонову вкладку) — примусово зберігаємо одразу, не чекаючи дебаунс
+  useEffect(() => {
+    function handleHide() {
+      if (document.visibilityState === "hidden" && fileHandle) {
+        writeToHandle(fileHandle).then(() => setLastSavedAt(new Date())).catch(() => {});
+      }
+    }
+    document.addEventListener("visibilitychange", handleHide);
+    window.addEventListener("pagehide", handleHide);
+    return () => {
+      document.removeEventListener("visibilitychange", handleHide);
+      window.removeEventListener("pagehide", handleHide);
+    };
+  }, [fileHandle, entries]);
+
+  // коли застосунок знову стає видимим (повернулись з фону) — перевіряємо дозвіл ще раз.
+  // Android/Chrome інколи "забуває" дозвіл на запис після перезапуску процесу застосунку.
+  useEffect(() => {
+    async function recheck() {
+      if (document.visibilityState !== "visible" || !fsaSupported) return;
+      const handle = fileHandle || pendingHandle;
+      if (!handle) return;
+      try {
+        const perm = await handle.queryPermission({ mode: "readwrite" });
+        if (perm === "granted" && !fileHandle) {
+          setFileHandle(handle);
+          setPendingHandle(null);
+        } else if (perm !== "granted" && fileHandle) {
+          setPendingHandle(fileHandle);
+          setFileHandle(null);
+        }
+      } catch (e) {}
+    }
+    document.addEventListener("visibilitychange", recheck);
+    return () => document.removeEventListener("visibilitychange", recheck);
+  }, [fileHandle, pendingHandle, fsaSupported]);
+
+  // періодичний резервний запис — на випадок, якщо якась зміна з якоїсь причини
+  // не спрацювала через звичайний автозапис по кожній зміні
+  useEffect(() => {
+    if (!fileHandle) return;
+    const id = setInterval(() => {
+      writeToHandle(fileHandle).then(() => setLastSavedAt(new Date())).catch(() => {});
+    }, 20000);
+    return () => clearInterval(id);
+  }, [fileHandle, entries]);
 
   function buildWorkbook(entriesToExport) {
     // сортуємо як у оригіналі — за датою (без дати — в кінець)
@@ -884,20 +945,20 @@ function App() {
         {fsaSupported && (
           <button
             onClick={
-              fileHandle ? disconnectExcelFile :
+              fileHandle ? forceSaveNow :
               pendingHandle ? reconnectExcelFile :
               connectExcelFile
             }
             title={
-              fileHandle ? `Автозбереження увімкнено (${fileHandle.name || "файл"}). Клік — відключити.` :
+              fileHandle ? `Автозбереження увімкнено (${fileHandle.name || "файл"}). Клік — зберегти зараз.` :
               pendingHandle ? "Автозбереження призупинено — клік, щоб відновити." :
               "Клік — обрати Excel-файл і увімкнути автозбереження"
             }
             style={{
               display: "flex", alignItems: "center", gap: 6, height: 36,
-              background: fileHandle ? "#e7efe9" : "#f6e8e6",
-              color: fileHandle ? "#25543f" : "#8a2f2f",
-              border: `1px solid ${fileHandle ? "#3E6B52" : "#B5474D"}`,
+              background: fileHandle ? "#e7efe9" : pendingHandle ? "#fbf0d9" : "#f6e8e6",
+              color: fileHandle ? "#25543f" : pendingHandle ? "#6b5417" : "#8a2f2f",
+              border: `1px solid ${fileHandle ? "#3E6B52" : pendingHandle ? "#e3cd8c" : "#B5474D"}`,
               borderRadius: 8, padding: "0 12px",
               fontFamily: "'IBM Plex Mono', monospace", fontSize: 12,
             }}
@@ -909,13 +970,21 @@ function App() {
       </div>
 
       {fsaSupported && (fileHandle || pendingHandle) && (
-        <div style={{ maxWidth: 880, margin: "6px auto 0", padding: "0 20px" }}>
+        <div style={{ maxWidth: 880, margin: "6px auto 0", padding: "0 20px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className="mono" style={{ fontSize: 11, color: autoSaveState === "error" ? "#B5474D" : "#8a8267" }}>
             {autoSaveState === "saving" && "Збереження у файл…"}
             {autoSaveState === "error" && "Не вдалося зберегти у файл."}
             {autoSaveState === "saved" && lastSavedAt && `Збережено у файл: ${fmtDateTime(lastSavedAt)}`}
             {autoSaveState === "idle" && pendingHandle && "Автозбереження призупинено — клік на кнопку, щоб відновити."}
           </span>
+          {fileHandle && (
+            <button
+              onClick={disconnectExcelFile}
+              style={{ background: "none", border: "none", color: "#8a8267", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, textDecoration: "underline" }}
+            >
+              відключити
+            </button>
+          )}
         </div>
       )}
 
