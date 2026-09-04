@@ -98,6 +98,12 @@ const fmtDateTime = (d) => {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
+function todayISO() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
@@ -781,7 +787,7 @@ function App() {
   }, [entries]);
 
   function openAdd() {
-    setEditing({ id: null, date: "", desc: "", usd: "", eur: "", rate: "", uah: "" });
+    setEditing({ id: null, date: todayISO(), desc: "", usd: "", eur: "", rate: "", uah: "" });
     setFormOpen(true);
   }
   function openEdit(entry) {
@@ -1237,7 +1243,6 @@ function EntryForm({ initial, onCancel, onSave, descOptions }) {
                 onChange={set("desc")}
                 onFocus={() => setShowSug(true)}
                 onBlur={() => setTimeout(() => setShowSug(false), 150)}
-                placeholder="напр. ЗП"
                 autoComplete="off"
               />
               {showSug && suggestions.length > 0 && (
@@ -1260,12 +1265,16 @@ function EntryForm({ initial, onCancel, onSave, descOptions }) {
             </div>
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Field label="$ (USD)"><input type="number" value={form.usd} onChange={set("usd")} /></Field>
-            <Field label="€ (EUR)"><input type="number" value={form.eur} onChange={set("eur")} /></Field>
+            <Field label="$ (USD)">
+              <AmountField value={form.usd} onChange={(v) => setForm((f) => ({ ...f, usd: v }))} />
+            </Field>
+            <Field label="€ (EUR)">
+              <AmountField value={form.eur} onChange={(v) => setForm((f) => ({ ...f, eur: v }))} />
+            </Field>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <Field label="Курс купівлі"><input type="number" step="0.01" value={form.rate} onChange={set("rate")} /></Field>
-            <Field label="Еквівалент, ₴ (авто, якщо порожньо)"><input type="number" value={form.uah} onChange={set("uah")} /></Field>
+            <Field label="Еквівалент, ₴"><input type="number" value={form.uah} onChange={set("uah")} /></Field>
           </div>
         </div>
 
@@ -1290,12 +1299,76 @@ function Field({ label, children }) {
   );
 }
 
+// --- поле суми з розділенням тисяч прямо під час введення ---
+function isSignificantChar(ch) {
+  return /[0-9\-.,]/.test(ch);
+}
+function cleanAmount(s) {
+  let str = (s || "").replace(/[\s\u00A0]/g, "");
+  const neg = str.startsWith("-");
+  str = str.replace(/-/g, "").replace(",", ".").replace(/[^\d.]/g, "");
+  const parts = str.split(".");
+  if (parts.length > 2) str = parts[0] + "." + parts.slice(1).join("");
+  return (neg ? "-" : "") + str;
+}
+function formatAmount(raw) {
+  if (raw === "" || raw === null || raw === undefined) return "";
+  if (raw === "-") return "-";
+  const endsWithDot = raw.endsWith(".");
+  const num = Number(raw);
+  if (isNaN(num)) return raw;
+  let formatted = new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 2 }).format(num);
+  if (endsWithDot) formatted += ",";
+  return formatted;
+}
+function countSignificant(s) {
+  let n = 0;
+  for (const ch of s) if (isSignificantChar(ch)) n++;
+  return n;
+}
+function posForSignificant(s, target) {
+  if (target <= 0) return 0;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (isSignificantChar(s[i])) {
+      n++;
+      if (n === target) return i + 1;
+    }
+  }
+  return s.length;
+}
+function AmountField({ value, onChange }) {
+  const ref = useRef(null);
+  function handleChange(ev) {
+    const input = ev.target;
+    const rawInput = input.value;
+    const cursorPos = input.selectionStart ?? rawInput.length;
+    const sigBefore = countSignificant(rawInput.slice(0, cursorPos));
+    const cleaned = cleanAmount(rawInput);
+    onChange(cleaned);
+    requestAnimationFrame(() => {
+      if (!ref.current) return;
+      const formatted = formatAmount(cleaned);
+      const pos = posForSignificant(formatted, sigBefore);
+      try { ref.current.setSelectionRange(pos, pos); } catch (e) {}
+    });
+  }
+  return (
+    <input
+      ref={ref}
+      type="text"
+      inputMode="decimal"
+      value={formatAmount(value)}
+      onChange={handleChange}
+    />
+  );
+}
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
 </script>
 
 <script>
-  // реєстрація service worker — щоб застосунок можна було встановити на Android і він працював офлайн
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW registration failed:", e));
