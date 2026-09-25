@@ -823,6 +823,12 @@ function App() {
       if (usd) setHereUsd((h) => Math.round((h + usd) * 100) / 100);
       if (eur) setHereEur((h) => Math.round((h + eur) * 100) / 100);
     }
+    // клік по "Зберегти" — це дія користувача (user gesture), тож саме зараз можна
+    // без нового спливаючого вікна відновити раніше наданий дозвіл на запис у файл,
+    // якщо він призупинився (щоб не треба було окремо тиснути кнопку "Автозбереження")
+    if (!fileHandle && pendingHandle) {
+      reconnectExcelFile();
+    }
     setFormOpen(false);
     setEditing(null);
   }
