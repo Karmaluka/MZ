@@ -538,67 +538,74 @@ function App() {
       { s: { r: 2, c: 4 }, e: { r: 2, c: 5 } },  // E3:F3 — сума €
     ];
 
-    ws["!cols"] = [
-      { wch: 9 }, { wch: 17 }, { wch: 34 }, { wch: 15.6 }, { wch: 11 }, { wch: 12.4 }, { wch: 18 }, { wch: 18 }, { wch: 17 }, { wch: 10.4 },
-    ];
+    // ---- блок підсумків на тому ж аркуші (колонки M-O) — усі дані з шапки застосунку,
+    // розраховані значення як формули, без посилань на інший аркуш ----
+    const rngD = `D${firstDataRow}:D${lastDataRow}`;
+    const rngE = `E${firstDataRow}:E${lastDataRow}`;
+    const rngG = `G${firstDataRow}:G${lastDataRow}`;
+    const rngH = `H${firstDataRow}:H${lastDataRow}`;
+
+    ws["M5"] = { t: "s", v: "Показник" };
+    ws["N5"] = { t: "s", v: "$" };
+    ws["O5"] = { t: "s", v: "€" };
+    ws["M6"] = { t: "s", v: "Сума" };
+    ws["N6"] = { t: "n", f: `SUM(${rngD})`, z: FMT_USD };
+    ws["O6"] = { t: "n", f: `SUM(${rngE})`, z: FMT_EUR };
+    ws["M7"] = { t: "s", v: "Купівля" };
+    ws["N7"] = { t: "n", f: `SUMIF(${rngH},"Купівля",${rngD})`, z: FMT_USD };
+    ws["O7"] = { t: "n", f: `SUMIF(${rngH},"Купівля",${rngE})`, z: FMT_EUR };
+    ws["M8"] = { t: "s", v: "Готівка" };
+    ws["N8"] = { t: "n", f: `SUMIFS(${rngD},${rngH},"Готівка",${rngD},">0")`, z: FMT_USD };
+    ws["O8"] = { t: "n", f: `SUMIFS(${rngE},${rngH},"Готівка",${rngE},">0")`, z: FMT_EUR };
+    ws["M9"] = { t: "s", v: "Витрати" };
+    ws["N9"] = { t: "n", f: `SUMIF(${rngD},"<0")`, z: FMT_USD };
+    ws["O9"] = { t: "n", f: `SUMIF(${rngE},"<0")`, z: FMT_EUR };
+    ws["M10"] = { t: "s", v: "ТУТ" };
+    ws["N10"] = { t: "n", v: Number(hereUsdVal) || 0, z: FMT_USD };
+    ws["O10"] = { t: "n", v: Number(hereEurVal) || 0, z: FMT_EUR };
+    ws["M11"] = { t: "s", v: "ТАМ" };
+    ws["N11"] = { t: "n", f: "N6-N10", z: FMT_USD };
+    ws["O11"] = { t: "n", f: "O6-O10", z: FMT_EUR };
+    ws["M13"] = { t: "s", v: "Разом $ + €" };
+    ws["N13"] = { t: "n", f: "N6+O6", z: FMT_USD };
+    ws["M14"] = { t: "s", v: "Переведені грн в $ (₴)" };
+    ws["N14"] = { t: "n", f: `SUM(${rngG})`, z: FMT_UAH };
+
+    // розширюємо діапазон аркуша, щоб врахувати блок підсумків у колонках M-O
+    const range2 = XLSX.utils.decode_range(ws["!ref"]);
+    range2.e.c = Math.max(range2.e.c, XLSX.utils.decode_col("O"));
+    range2.e.r = Math.max(range2.e.r, 13); // рядок 14 (0-індекс 13)
+    ws["!ref"] = XLSX.utils.encode_range(range2);
+
+    const sLabel = { font: { name: "Calibri", sz: 12, bold: true, color: { rgb: COL_NAVY } } };
+    const sHeaderRow = { font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: COL_NAVY } }, alignment: { horizontal: "center" } };
+    const sVal = { font: { name: "Calibri", sz: 13 }, alignment: { horizontal: "right" } };
+    ["M5", "N5", "O5"].forEach((c) => { ws[c].s = sHeaderRow; });
+    ["M6", "M7", "M8", "M9", "M10", "M11", "M13", "M14"].forEach((c) => { if (ws[c]) ws[c].s = sLabel; });
+    ["N6", "O6", "N7", "O7", "N8", "O8", "N9", "O9", "N10", "O10", "N11", "O11", "N13", "N14"].forEach((c) => { if (ws[c]) ws[c].s = sVal; });
+
+    const cols = [];
+    cols[0] = { wch: 9 };    // A
+    cols[1] = { wch: 17 };   // B
+    cols[2] = { wch: 34 };   // C
+    cols[3] = { wch: 15.6 }; // D
+    cols[4] = { wch: 11 };   // E
+    cols[5] = { wch: 12.4 }; // F
+    cols[6] = { wch: 18 };   // G
+    cols[7] = { wch: 12 };   // H — Тип
+    cols[8] = { wch: 17 };   // I — бейджі
+    cols[9] = { wch: 10.4 }; // J
+    cols[12] = { wch: 24 };  // M — підсумки
+    cols[13] = { wch: 16 };  // N
+    cols[14] = { wch: 16 };  // O
+    ws["!cols"] = cols;
     ws["!rows"] = [
       { hpt: 34.5 }, { hpt: 33 }, { hpt: 39 }, { hpt: 7.5 },
-      ...Array(lastDataRow - 4).fill({ hpt: 21 }),
+      ...Array(Math.max(lastDataRow, 14) - 4).fill({ hpt: 21 }),
     ];
-
-    // ---- аркуш "Підсумки" — усі дані з шапки застосунку, розраховані значення як формули ----
-    const sumLastRow = Math.max(lastDataRow, firstDataRow); // безпечний діапазон навіть без жодного запису
-    const SHEET = "'Заощадження'";
-    const rngD = `${SHEET}!D${firstDataRow}:D${sumLastRow}`;
-    const rngE = `${SHEET}!E${firstDataRow}:E${sumLastRow}`;
-    const rngG = `${SHEET}!G${firstDataRow}:G${sumLastRow}`;
-    const rngH = `${SHEET}!H${firstDataRow}:H${sumLastRow}`;
-
-    const aoa2 = [
-      ["Підсумки (синхронізовано з шапкою застосунку)"],
-      [],
-      ["Показник", "$", "€"],
-      ["Сума"],
-      ["Купівля"],
-      ["Готівка"],
-      ["Витрати"],
-      ["ТУТ"],
-      ["ТАМ"],
-      [],
-      ["Разом $ + €"],
-      ["Переведені грн в $ (₴)"],
-    ];
-    const ws2 = XLSX.utils.aoa_to_sheet(aoa2);
-
-    ws2["B4"] = { t: "n", f: `SUM(${rngD})`, z: FMT_USD };
-    ws2["C4"] = { t: "n", f: `SUM(${rngE})`, z: FMT_EUR };
-    ws2["B5"] = { t: "n", f: `SUMIF(${rngH},"Купівля",${rngD})`, z: FMT_USD };
-    ws2["C5"] = { t: "n", f: `SUMIF(${rngH},"Купівля",${rngE})`, z: FMT_EUR };
-    ws2["B6"] = { t: "n", f: `SUMIFS(${rngD},${rngH},"Готівка",${rngD},">0")`, z: FMT_USD };
-    ws2["C6"] = { t: "n", f: `SUMIFS(${rngE},${rngH},"Готівка",${rngE},">0")`, z: FMT_EUR };
-    ws2["B7"] = { t: "n", f: `SUMIF(${rngD},"<0")`, z: FMT_USD };
-    ws2["C7"] = { t: "n", f: `SUMIF(${rngE},"<0")`, z: FMT_EUR };
-    ws2["B8"] = { t: "n", v: Number(hereUsdVal) || 0, z: FMT_USD };
-    ws2["C8"] = { t: "n", v: Number(hereEurVal) || 0, z: FMT_EUR };
-    ws2["B9"] = { t: "n", f: "B4-B8", z: FMT_USD };
-    ws2["C9"] = { t: "n", f: "C4-C8", z: FMT_EUR };
-    ws2["B11"] = { t: "n", f: "B4+C4", z: FMT_USD };
-    ws2["B12"] = { t: "n", f: `SUM(${rngG})`, z: FMT_UAH };
-
-    const sLabel = { font: { name: "Calibri", sz: 13, bold: true, color: { rgb: COL_NAVY } } };
-    const sHeader = { font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: COL_NAVY } }, alignment: { horizontal: "center" } };
-    const sTitle2 = { font: { name: "Calibri", sz: 16, bold: true, color: { rgb: COL_BLUE } } };
-    const sVal = { font: { name: "Calibri", sz: 13 }, alignment: { horizontal: "right" } };
-    ws2["A1"].s = sTitle2;
-    ["A3", "B3", "C3"].forEach((c) => { ws2[c].s = sHeader; });
-    ["A4", "A5", "A6", "A7", "A8", "A9", "A11", "A12"].forEach((c) => { if (ws2[c]) ws2[c].s = sLabel; });
-    ["B4", "C4", "B5", "C5", "B6", "C6", "B7", "C7", "B8", "C8", "B9", "C9", "B11", "B12"].forEach((c) => { if (ws2[c]) ws2[c].s = sVal; });
-    ws2["!cols"] = [{ wch: 26 }, { wch: 16 }, { wch: 16 }];
-    ws2["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Заощадження");
-    XLSX.utils.book_append_sheet(wb, ws2, "Підсумки");
     return wb;
   }
 
