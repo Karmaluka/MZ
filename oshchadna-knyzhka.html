@@ -308,7 +308,7 @@ function App() {
   }, []);
 
   async function writeToHandle(handle) {
-    const wb = buildWorkbook(entries);
+    const wb = buildWorkbook(entries, hereUsd, hereEur);
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const writable = await handle.createWritable();
     await writable.write(buf);
@@ -440,7 +440,7 @@ function App() {
     return () => clearInterval(id);
   }, [fileHandle, entries]);
 
-  function buildWorkbook(entriesToExport) {
+  function buildWorkbook(entriesToExport, hereUsdVal, hereEurVal) {
     // сортуємо як у оригіналі — за датою (без дати — в кінець)
     const sorted = [...entriesToExport].sort((a, b) => {
       if (!a.date && !b.date) return 0;
@@ -469,7 +469,7 @@ function App() {
     aoa[1] = [];
     aoa[2] = [];
     aoa[3] = [];
-    aoa[4] = [null, "Дата", "Опис", "Дохід $", "€", "курс", "грн."];
+    aoa[4] = [null, "Дата", "Опис", "Дохід $", "€", "курс", "грн.", "Тип"];
 
     sorted.forEach((e, i) => {
       const dateVal = e.date ? new Date(e.date + "T00:00:00") : null;
@@ -477,6 +477,11 @@ function App() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // ---- колонка "Тип" — Купівля (є курс/еквівалент у грн) чи Готівка (немає) ----
+    for (let r = firstDataRow; r <= lastDataRow; r++) {
+      ws[`H${r}`] = { t: "str", f: `IF(OR(F${r}<>"",G${r}<>""),"Купівля","Готівка")` };
+    }
 
     // ---- підсумкові формули в рядку 3 ----
     ws["B3"] = { t: "n", f: `SUM(D${firstDataRow}:D${lastDataRow})`, z: FMT_USD };
@@ -510,6 +515,7 @@ function App() {
     ws["E5"].s = { font: { name: "Calibri", sz: 16 }, alignment: { horizontal: "center" } };
     ws["F5"].s = { font: { name: "Calibri", sz: 12 }, alignment: { horizontal: "center", vertical: "center" } };
     ws["G5"].s = { font: { name: "Calibri", sz: 14, bold: true, color: { rgb: "000000" } }, alignment: { horizontal: "center", vertical: "center" } };
+    ws["H5"].s = { font: { name: "Calibri", sz: 12, bold: true, color: { rgb: COL_NAVY } }, alignment: { horizontal: "center", vertical: "center" } };
 
     // рядки даних
     for (let r = firstDataRow; r <= lastDataRow; r++) {
@@ -521,6 +527,8 @@ function App() {
       if (cE) { cE.s = { font: { name: "Calibri", sz: 16 }, alignment: { horizontal: "center", vertical: "center" } }; if (cE.v !== undefined) cE.z = FMT_EUR; }
       if (cF) cF.s = { font: { name: "Calibri", sz: 12 }, alignment: { horizontal: "center", vertical: "center" } };
       if (cG) { cG.s = { font: { name: "Calibri", sz: 14, bold: true }, alignment: { horizontal: "center", vertical: "center" } }; if (cG.v !== undefined) cG.z = FMT_UAH; }
+      const cH = ws[`H${r}`];
+      if (cH) cH.s = { font: { name: "Calibri", sz: 11, color: { rgb: "5a5237" } }, alignment: { horizontal: "center", vertical: "center" } };
     }
 
     // об'єднання клітинок — як в оригіналі
@@ -538,13 +546,64 @@ function App() {
       ...Array(lastDataRow - 4).fill({ hpt: 21 }),
     ];
 
+    // ---- аркуш "Підсумки" — усі дані з шапки застосунку, розраховані значення як формули ----
+    const sumLastRow = Math.max(lastDataRow, firstDataRow); // безпечний діапазон навіть без жодного запису
+    const SHEET = "'Заощадження'";
+    const rngD = `${SHEET}!D${firstDataRow}:D${sumLastRow}`;
+    const rngE = `${SHEET}!E${firstDataRow}:E${sumLastRow}`;
+    const rngG = `${SHEET}!G${firstDataRow}:G${sumLastRow}`;
+    const rngH = `${SHEET}!H${firstDataRow}:H${sumLastRow}`;
+
+    const aoa2 = [
+      ["Підсумки (синхронізовано з шапкою застосунку)"],
+      [],
+      ["Показник", "$", "€"],
+      ["Сума"],
+      ["Купівля"],
+      ["Готівка"],
+      ["Витрати"],
+      ["ТУТ"],
+      ["ТАМ"],
+      [],
+      ["Разом $ + €"],
+      ["Переведені грн в $ (₴)"],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(aoa2);
+
+    ws2["B4"] = { t: "n", f: `SUM(${rngD})`, z: FMT_USD };
+    ws2["C4"] = { t: "n", f: `SUM(${rngE})`, z: FMT_EUR };
+    ws2["B5"] = { t: "n", f: `SUMIF(${rngH},"Купівля",${rngD})`, z: FMT_USD };
+    ws2["C5"] = { t: "n", f: `SUMIF(${rngH},"Купівля",${rngE})`, z: FMT_EUR };
+    ws2["B6"] = { t: "n", f: `SUMIFS(${rngD},${rngH},"Готівка",${rngD},">0")`, z: FMT_USD };
+    ws2["C6"] = { t: "n", f: `SUMIFS(${rngE},${rngH},"Готівка",${rngE},">0")`, z: FMT_EUR };
+    ws2["B7"] = { t: "n", f: `SUMIF(${rngD},"<0")`, z: FMT_USD };
+    ws2["C7"] = { t: "n", f: `SUMIF(${rngE},"<0")`, z: FMT_EUR };
+    ws2["B8"] = { t: "n", v: Number(hereUsdVal) || 0, z: FMT_USD };
+    ws2["C8"] = { t: "n", v: Number(hereEurVal) || 0, z: FMT_EUR };
+    ws2["B9"] = { t: "n", f: "B4-B8", z: FMT_USD };
+    ws2["C9"] = { t: "n", f: "C4-C8", z: FMT_EUR };
+    ws2["B11"] = { t: "n", f: "B4+C4", z: FMT_USD };
+    ws2["B12"] = { t: "n", f: `SUM(${rngG})`, z: FMT_UAH };
+
+    const sLabel = { font: { name: "Calibri", sz: 13, bold: true, color: { rgb: COL_NAVY } } };
+    const sHeader = { font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: COL_NAVY } }, alignment: { horizontal: "center" } };
+    const sTitle2 = { font: { name: "Calibri", sz: 16, bold: true, color: { rgb: COL_BLUE } } };
+    const sVal = { font: { name: "Calibri", sz: 13 }, alignment: { horizontal: "right" } };
+    ws2["A1"].s = sTitle2;
+    ["A3", "B3", "C3"].forEach((c) => { ws2[c].s = sHeader; });
+    ["A4", "A5", "A6", "A7", "A8", "A9", "A11", "A12"].forEach((c) => { if (ws2[c]) ws2[c].s = sLabel; });
+    ["B4", "C4", "B5", "C5", "B6", "C6", "B7", "C7", "B8", "C8", "B9", "C9", "B11", "B12"].forEach((c) => { if (ws2[c]) ws2[c].s = sVal; });
+    ws2["!cols"] = [{ wch: 26 }, { wch: 16 }, { wch: 16 }];
+    ws2["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Заощадження");
+    XLSX.utils.book_append_sheet(wb, ws2, "Підсумки");
     return wb;
   }
 
   function exportXlsx() {
-    const wb = buildWorkbook(entries);
+    const wb = buildWorkbook(entries, hereUsd, hereEur);
     const stamp = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `oshchadna-knyzhka-${stamp}.xlsx`);
   }
@@ -804,8 +863,8 @@ function App() {
     const rate = form.rate === "" ? null : Number(form.rate);
     let uah = form.uah === "" ? null : Number(form.uah);
     if (uah === null && rate !== null) {
-      const amt = usd ?? eur;
-      if (amt !== null) uah = Math.round(amt * rate * 100) / 100;
+      const amt = (usd || 0) + (eur || 0);
+      if (amt) uah = Math.round(amt * rate * 100) / 100;
     }
     const clean = {
       id: form.id ?? uid(),
