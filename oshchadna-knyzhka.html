@@ -666,6 +666,8 @@ function App() {
         // (заголовки не завжди в першому рядку — вище можуть бути назва, підсумки тощо)
         const rows2d = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
 
+        const isEmpty = (v) => v === null || v === undefined || v === "";
+
         let headerIdx = -1, cols = null;
         for (let r = 0; r < Math.min(rows2d.length, 30); r++) {
           const row = rows2d[r] || [];
@@ -689,6 +691,19 @@ function App() {
           throw new Error("Не вдалося знайти рядок заголовків (мають бути колонки «Дата» і «Опис»)");
         }
 
+        // шукаємо по всьому файлу рядок "ТУТ" (блок підсумків) — щоб відновити ці суми теж
+        let importedHereUsd = null, importedHereEur = null;
+        for (let r = 0; r < rows2d.length; r++) {
+          const row = rows2d[r] || [];
+          for (let c = 0; c < row.length; c++) {
+            if (normHeader(row[c]) === "тут") {
+              const u = row[c + 1], e = row[c + 2];
+              if (!isEmpty(u) && !isNaN(Number(u))) importedHereUsd = Number(u);
+              if (!isEmpty(e) && !isNaN(Number(e))) importedHereEur = Number(e);
+            }
+          }
+        }
+
         const parsed = [];
         for (let r = headerIdx + 1; r < rows2d.length; r++) {
           const row = rows2d[r] || [];
@@ -699,7 +714,6 @@ function App() {
           const rateRaw = cols.rate !== -1 ? row[cols.rate] : null;
           const uahRaw = cols.uah !== -1 ? row[cols.uah] : null;
 
-          const isEmpty = (v) => v === null || v === undefined || v === "";
           if (isEmpty(dateRaw) && isEmpty(desc) && isEmpty(usdRaw) && isEmpty(eurRaw)) continue; // порожній рядок
 
           const usd = !isEmpty(usdRaw) && !isNaN(Number(usdRaw)) ? Number(usdRaw) : null;
@@ -729,6 +743,8 @@ function App() {
         } else {
           setEntries((prev) => [...parsed, ...prev]);
         }
+        if (importedHereUsd !== null) setHereUsd(importedHereUsd);
+        if (importedHereEur !== null) setHereEur(importedHereEur);
         setImportMsg({ ok: true, text: `Імпортовано ${parsed.length} записів з Excel.` });
       } catch (e) {
         setImportMsg({ ok: false, text: "Не вдалося прочитати Excel-файл: " + e.message });
